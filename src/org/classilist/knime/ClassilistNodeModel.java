@@ -1,22 +1,41 @@
 package org.classilist.knime;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLConnection;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 
-import org.knime.core.data.DataCell;
-import org.knime.core.data.DataColumnSpec;
-import org.knime.core.data.DataColumnSpecCreator;
-import org.knime.core.data.DataRow;
 import org.knime.core.data.DataTableSpec;
-import org.knime.core.data.RowKey;
-import org.knime.core.data.def.DefaultRow;
-import org.knime.core.data.def.DoubleCell;
-import org.knime.core.data.def.IntCell;
-import org.knime.core.data.def.StringCell;
-import org.knime.core.node.BufferedDataContainer;
+import org.knime.core.data.DataType;
+import org.knime.core.data.DoubleValue;
+import org.knime.core.data.IntValue;
+import org.knime.core.data.StringValue;
 import org.knime.core.node.BufferedDataTable;
 import org.knime.core.node.CanceledExecutionException;
-import org.knime.core.node.defaultnodesettings.SettingsModelIntegerBounded;
+import org.knime.core.node.port.PortObjectSpec;
+import org.knime.core.node.streamable.InputPortRole;
+import org.knime.core.node.streamable.PartitionInfo;
+import org.knime.core.node.streamable.PortInput;
+import org.knime.core.node.streamable.PortOutput;
+import org.knime.core.node.streamable.RowInput;
+import org.knime.core.node.streamable.StreamableOperator;
+import org.knime.core.node.util.CheckUtils;
+import org.knime.core.node.util.StringHistory;
+import org.knime.core.util.FileUtil;
+import org.classilist.knime.Classilist;
+import org.classilist.knime.ClassilistNodeModel;
+import org.classilist.knime.FileWriterNodeSettings;
+import org.classilist.knime.FileWriterSettings;
+import org.classilist.knime.FileWriterNodeSettings.FileOverwritePolicy;
 import org.knime.core.node.ExecutionContext;
 import org.knime.core.node.ExecutionMonitor;
 import org.knime.core.node.InvalidSettingsException;
@@ -26,6 +45,8 @@ import org.knime.core.node.NodeSettingsRO;
 import org.knime.core.node.NodeSettingsWO;
 
 
+
+
 /**
  * This is the model implementation of Classilist.
  * Connector Node for KNIME and classilist application for probabilistic classification results.
@@ -33,110 +54,24 @@ import org.knime.core.node.NodeSettingsWO;
  * @author Medha Katehara
  */
 public class ClassilistNodeModel extends NodeModel {
-    
-    // the logger instance
-    private static final NodeLogger logger = NodeLogger
-            .getLogger(ClassilistNodeModel.class);
-        
-    /** the settings key which is used to retrieve and 
-        store the settings (from the dialog or from a settings file)    
-       (package visibility to be usable from the dialog). */
-	static final String CFGKEY_COUNT = "Count";
 
-    /** initial default count value. */
-    static final int DEFAULT_COUNT = 100;
+    /** The node logger for this class. */
+    private static final NodeLogger LOGGER =
+            NodeLogger.getLogger(ClassilistNodeModel.class);
 
-    // example value: the models count variable filled from the dialog 
-    // and used in the models execution method. The default components of the
-    // dialog work with "SettingsModels".
-    private final SettingsModelIntegerBounded m_count =
-        new SettingsModelIntegerBounded(ClassilistNodeModel.CFGKEY_COUNT,
-                    ClassilistNodeModel.DEFAULT_COUNT,
-                    Integer.MIN_VALUE, Integer.MAX_VALUE);
-    
+    private FileWriterNodeSettings m_settings;
 
     /**
-     * Constructor for the node model.
+     * Identifier for StringHistory.
      */
-    protected ClassilistNodeModel() {
-    
-        // TODO one incoming port and one outgoing port is assumed
-        super(1, 1);
-    }
+    public static final String FILE_HISTORY_ID = "csvwrite";
 
     /**
-     * {@inheritDoc}
+     * Constructor, sets port count.
      */
-    @Override
-    protected BufferedDataTable[] execute(final BufferedDataTable[] inData,
-            final ExecutionContext exec) throws Exception {
-
-        // TODO do something here
-        logger.info("Node Model Stub... this is not yet implemented !");
-
-        
-        // the data table spec of the single output table, 
-        // the table will have three columns:
-        DataColumnSpec[] allColSpecs = new DataColumnSpec[3];
-        allColSpecs[0] = 
-            new DataColumnSpecCreator("Column 0", StringCell.TYPE).createSpec();
-        allColSpecs[1] = 
-            new DataColumnSpecCreator("Column 1", DoubleCell.TYPE).createSpec();
-        allColSpecs[2] = 
-            new DataColumnSpecCreator("Column 2", IntCell.TYPE).createSpec();
-        DataTableSpec outputSpec = new DataTableSpec(allColSpecs);
-        // the execution context will provide us with storage capacity, in this
-        // case a data container to which we will add rows sequentially
-        // Note, this container can also handle arbitrary big data tables, it
-        // will buffer to disc if necessary.
-        BufferedDataContainer container = exec.createDataContainer(outputSpec);
-        // let's add m_count rows to it
-        for (int i = 0; i < m_count.getIntValue(); i++) {
-            RowKey key = new RowKey("Row " + i);
-            // the cells of the current row, the types of the cells must match
-            // the column spec (see above)
-            DataCell[] cells = new DataCell[3];
-            cells[0] = new StringCell("String_" + i); 
-            cells[1] = new DoubleCell(0.5 * i); 
-            cells[2] = new IntCell(i);
-            DataRow row = new DefaultRow(key, cells);
-            container.addRowToTable(row);
-            
-            // check if the execution monitor was canceled
-            exec.checkCanceled();
-            exec.setProgress(i / (double)m_count.getIntValue(), 
-                "Adding row " + i);
-        }
-        // once we are done, we close the container and return its table
-        container.close();
-        BufferedDataTable out = container.getTable();
-        return new BufferedDataTable[]{out};
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    protected void reset() {
-        // TODO Code executed on reset.
-        // Models build during execute are cleared here.
-        // Also data handled in load/saveInternals will be erased here.
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    protected DataTableSpec[] configure(final DataTableSpec[] inSpecs)
-            throws InvalidSettingsException {
-        
-        // TODO: check if user settings are available, fit to the incoming
-        // table structure, and the incoming types are feasible for the node
-        // to execute. If the node can execute in its current state return
-        // the spec of its output data table(s) (if you can, otherwise an array
-        // with null elements), or throw an exception with a useful user message
-
-        return new DataTableSpec[]{null};
+    public ClassilistNodeModel() {
+        super(1, 0);
+        m_settings = new FileWriterNodeSettings();
     }
 
     /**
@@ -144,26 +79,15 @@ public class ClassilistNodeModel extends NodeModel {
      */
     @Override
     protected void saveSettingsTo(final NodeSettingsWO settings) {
-
-        // TODO save user settings to the config object.
-        
-        m_count.saveSettingsTo(settings);
-
+        m_settings.saveSettingsTo(settings);
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    protected void loadValidatedSettingsFrom(final NodeSettingsRO settings)
-            throws InvalidSettingsException {
-            
-        // TODO load (valid) settings from the config object.
-        // It can be safely assumed that the settings are valided by the 
-        // method below.
-        
-        m_count.loadSettingsFrom(settings);
-
+    public InputPortRole[] getInputPortRoles() {
+        return new InputPortRole[] {InputPortRole.NONDISTRIBUTED_STREAMABLE};
     }
 
     /**
@@ -172,49 +96,274 @@ public class ClassilistNodeModel extends NodeModel {
     @Override
     protected void validateSettings(final NodeSettingsRO settings)
             throws InvalidSettingsException {
-            
-        // TODO check if the settings could be applied to our model
-        // e.g. if the count is in a certain range (which is ensured by the
-        // SettingsModel).
-        // Do not actually set any values of any member variables.
 
-        m_count.validateSettings(settings);
+        // the constructor complains if settings are missing
+        FileWriterNodeSettings fws = new FileWriterNodeSettings(settings);
 
+        // check consistency of settings
+
+        String fileName = fws.getFileName();
+        if (fileName == null || fileName.length() == 0) {
+            throw new InvalidSettingsException("Missing output file name.");
+        }
+
+        // the separator must not be contained in the missing value pattern
+        // nor in the quote begin pattern.
+        if (notEmpty(fws.getColSeparator())) {
+            if (notEmpty(fws.getMissValuePattern())) {
+                if (fws.getMissValuePattern().contains(fws.getColSeparator())) {
+                    throw new InvalidSettingsException(
+                            "The pattern for missing values ('"
+                                    + fws.getMissValuePattern()
+                                    + "') must not contain the data "
+                                    + "separator ('" + fws.getColSeparator()
+                                    + "').");
+                }
+            }
+
+        }
     }
-    
+
     /**
      * {@inheritDoc}
      */
     @Override
-    protected void loadInternals(final File internDir,
-            final ExecutionMonitor exec) throws IOException,
-            CanceledExecutionException {
-        
-        // TODO load internal data. 
-        // Everything handed to output ports is loaded automatically (data
-        // returned by the execute method, models loaded in loadModelContent,
-        // and user settings set through loadSettingsFrom - is all taken care 
-        // of). Load here only the other internals that need to be restored
-        // (e.g. data used by the views).
+    protected void loadValidatedSettingsFrom(final NodeSettingsRO settings)
+            throws InvalidSettingsException {
+        m_settings = new FileWriterNodeSettings(settings);
 
+        if (notEmpty(m_settings.getFileName())) {
+            StringHistory history = StringHistory.getInstance(FILE_HISTORY_ID);
+            history.add(m_settings.getFileName());
+        }
     }
-    
+
     /**
      * {@inheritDoc}
      */
     @Override
-    protected void saveInternals(final File internDir,
-            final ExecutionMonitor exec) throws IOException,
-            CanceledExecutionException {
-       
-        // TODO save internal models. 
-        // Everything written to output ports is saved automatically (data
-        // returned by the execute method, models saved in the saveModelContent,
-        // and user settings saved through saveSettingsTo - is all taken care 
-        // of). Save here only the other internals that need to be preserved
-        // (e.g. data used by the views).
+    public StreamableOperator createStreamableOperator(final PartitionInfo partitionInfo, final PortObjectSpec[] inSpecs)
+        throws InvalidSettingsException {
 
+        return new StreamableOperator() {
+            @Override
+            public void runFinal(final PortInput[] inputs, final PortOutput[] outputs, final ExecutionContext exec)
+                    throws Exception {
+                assert outputs.length == 0;
+                RowInput input = (RowInput)inputs[0];
+                doIt(null, input, exec);
+                return;
+            }
+        };
     }
 
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected BufferedDataTable[] execute(final BufferedDataTable[] data,
+            final ExecutionContext exec) throws Exception {
+        return doIt(data[0], null, exec);
+    }
+
+    private BufferedDataTable[] doIt(final BufferedDataTable data, final RowInput input, final ExecutionContext exec)
+            throws Exception {
+
+        CheckUtils.checkDestinationFile(m_settings.getFileName(),
+            m_settings.getFileOverwritePolicy() != FileOverwritePolicy.Abort);
+
+        URL url = FileUtil.toURL(m_settings.getFileName());
+        Path localPath = FileUtil.resolveToPath(url);
+
+        boolean writeColHeader = m_settings.writeColumnHeader();
+        OutputStream tempOut;
+        URLConnection urlConnection = null;
+        boolean appendToFile;
+        if (localPath != null) {
+            // figure out if the writer is actually supposed to write col headers
+            if (Files.exists(localPath)) {
+                appendToFile = m_settings.getFileOverwritePolicy() == FileOverwritePolicy.Append;
+                writeColHeader = true;
+            } else {
+                appendToFile = false;
+            }
+            if (appendToFile) {
+                tempOut = Files.newOutputStream(localPath, StandardOpenOption.APPEND);
+            } else {
+                tempOut = Files.newOutputStream(localPath);
+            }
+        } else {
+            urlConnection = FileUtil.openOutputConnection(url, "PUT");
+            tempOut = urlConnection.getOutputStream();
+            appendToFile = false;
+        }
+
+        // make a copy of the settings with the modified value
+        FileWriterSettings writerSettings = new FileWriterSettings(m_settings);
+        writerSettings.setWriteColumnHeader(writeColHeader);
+
+        tempOut = new BufferedOutputStream(tempOut);
+        Charset charSet = Charset.defaultCharset();
+        String encoding = writerSettings.getCharacterEncoding();
+        if (encoding != null) {
+            charSet = Charset.forName(encoding);
+        }
+        Classilist tableWriter = new Classilist(new OutputStreamWriter(tempOut, charSet), writerSettings);
+        // write the comment header, if we are supposed to
+        String tableName;
+        if (input == null) {
+            tableName = data.getDataTableSpec().getName();
+        } else {
+            tableName = input.getDataTableSpec().getName();
+        }
+
+        try {
+            if (input == null) {
+                tableWriter.write(data, exec);
+            } else {
+                tableWriter.write(input, exec);
+            }
+            tableWriter.close();            
+
+            if (tableWriter.hasWarningMessage()) {
+                setWarningMessage(tableWriter.getLastWarningMessage());
+            }
+
+            // execution successful
+            if (input == null) {
+                return new BufferedDataTable[0];
+            } else {
+                return null;
+            }
+        } catch (CanceledExecutionException cee) {
+            try {
+                tableWriter.close();                  
+            } catch (IOException ex) {
+                // may happen if the stream is already closed by the interrupted thread
+            }
+            if (localPath != null) {
+                LOGGER.info("Table FileWriter canceled.");
+                try {
+                    Files.delete(localPath);
+                    LOGGER.debug("File '" + m_settings.getFileName() + "' deleted after node has been canceled.");
+                } catch (IOException ex) {
+                    LOGGER.warn("Unable to delete file '"
+                            + m_settings.getFileName() + "' after cancellation: " + ex.getMessage(), ex);
+                }
+            }
+            throw cee;
+        }
+
+    }
+    protected void reset() {
+        // empty
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void loadInternals(final File nodeInternDir,
+            final ExecutionMonitor exec) throws IOException,
+            CanceledExecutionException {
+        // no internals to save
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void saveInternals(final File nodeInternDir,
+            final ExecutionMonitor exec) throws IOException,
+            CanceledExecutionException {
+        // nothing to save.
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected DataTableSpec[] configure(final DataTableSpec[] inSpecs)
+            throws InvalidSettingsException {
+        String warnMsg = "";
+
+        /*
+         * check file access
+         */
+        String fileCheckWarning =
+                CheckUtils.checkDestinationFile(m_settings.getFileName(),
+                    m_settings.getFileOverwritePolicy() != FileOverwritePolicy.Abort);
+        if (fileCheckWarning != null) {
+            if (m_settings.getFileOverwritePolicy() == FileOverwritePolicy.Append) {
+                fileCheckWarning = fileCheckWarning.replace("overwritten", "appended");
+            }
+            warnMsg = fileCheckWarning + "\n";
+        }
+
+
+        /*
+         * check settings
+         */
+        if (isEmpty(m_settings.getColSeparator())
+                && isEmpty(m_settings.getMissValuePattern())
+                && (isEmpty(m_settings.getQuoteBegin()) || isEmpty(m_settings
+                        .getQuoteEnd()))) {
+            // we will write the table out - but they will have a hard
+            // time reading it in again.
+            warnMsg +=
+                    "No separator and no quotes and no missing value "
+                            + "pattern set."
+                            + "\nWritten data will be hard to read!";
+        }
+
+        DataTableSpec inSpec = inSpecs[0];
+        for (int i = 0; i < inSpec.getNumColumns(); i++) {
+            DataType c = inSpec.getColumnSpec(i).getType();
+            if (!c.isCompatible(DoubleValue.class)
+                    && !c.isCompatible(IntValue.class)
+                    && !c.isCompatible(StringValue.class)) {
+                throw new InvalidSettingsException(
+                        "Input table must only contain "
+                                + "String, Int, or Doubles");
+            }
+        }
+        if (inSpec.containsCompatibleType(DoubleValue.class)) {
+            if (m_settings.getColSeparator().indexOf(
+                    m_settings.getDecimalSeparator()) >= 0) {
+                warnMsg +=
+                        "The data separator contains (or is equal to) the "
+                                + "decimal separator\nWritten data will be hard to read!";
+            }
+        }
+
+        if (!warnMsg.isEmpty()) {
+            setWarningMessage(warnMsg.trim());
+        }
+
+        return new DataTableSpec[0];
+    }
+
+    static boolean notEmpty(final String s) {
+        if (s == null) {
+            return false;
+        }
+        return (s.length() > 0);
+    }
+
+    static boolean isEmpty(final String s) {
+        return !notEmpty(s);
+    }
+
+    /**
+     * Creates an URL from the "file"name entered in the dialog.
+     *
+     */
+    static URL getUrl(final String fileName) throws MalformedURLException {
+        try {
+            return new URL(fileName);
+        } catch (MalformedURLException ex) {
+            return Paths.get(fileName).toAbsolutePath().toUri().toURL();
+        }
+    }
 }
-
